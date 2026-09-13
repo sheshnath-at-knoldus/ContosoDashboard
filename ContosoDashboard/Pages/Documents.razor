@@ -1,0 +1,423 @@
+@page "/documents"
+@using ContosoDashboard.Models
+@using ContosoDashboard.Services
+@using Microsoft.AspNetCore.Authorization
+@using System.Security.Claims
+@attribute [Authorize]
+@inject IDocumentService DocumentService
+@inject IUserService UserService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Documents - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="row mb-4 align-items-center">
+        <div class="col">
+            <h1>Documents</h1>
+        </div>
+        <div class="col-auto">
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#uploadDocumentModal">
+                <i class="bi bi-upload"></i> Upload Document
+            </button>
+        </div>
+    </div>
+
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <input class="form-control" placeholder="Search by title, tag, uploader, or project" @bind="searchText" @bind:event="oninput" />
+        </div>
+        <div class="col-md-4">
+            <button class="btn btn-secondary w-100" @onclick="Search">Search</button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(successMessage))
+    {
+        <div class="alert alert-success">@successMessage</div>
+    }
+
+    <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "mine" ? "active" : "")" @onclick='() => SetActiveTab("mine")'>My Documents</button>
+        </li>
+        <li class="nav-item">
+            <button class="nav-link @(activeTab == "shared" ? "active" : "")" @onclick='() => SetActiveTab("shared")'>Shared with Me</button>
+        </li>
+    </ul>
+
+    @if (activeTab == "mine")
+    {
+        @if (documents == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else if (!documents.Any())
+        {
+            <div class="alert alert-info">No documents found in your accessible workspace.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Category</th>
+                            <th>Project</th>
+                            <th>Size</th>
+                            <th>Status</th>
+                            <th>Uploaded</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var document in documents)
+                        {
+                            <tr>
+                                <td>
+                                    <strong>@document.Title</strong>
+                                    @if (!string.IsNullOrWhiteSpace(document.Description))
+                                    {
+                                        <br />
+                                        <small class="text-muted">@document.Description</small>
+                                    }
+                                </td>
+                                <td>@document.Category</td>
+                                <td>@(document.Project?.Name ?? "Personal")</td>
+                                <td>@FormatBytes(document.FileSizeBytes)</td>
+                                <td>
+                                    <span class="badge bg-@GetStatusColor(document.Status)">@document.Status</span>
+                                </td>
+                                <td>@document.UploadedAtUtc.ToLocalTime().ToString("MMM dd, yyyy")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => DownloadDocument(document.DocumentId)">Download</button>
+                                    @if (document.UploadedByUserId == currentUserId)
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="modal" data-bs-target="#shareDocumentModal" @onclick="() => OpenShareModal(document.DocumentId)">Share</button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteDocument(document.DocumentId)">Delete</button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+    else
+    {
+        @if (sharedDocuments == null)
+        {
+            <p><em>Loading...</em></p>
+        }
+        else if (!sharedDocuments.Any())
+        {
+            <div class="alert alert-info">No documents have been shared with you yet.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Category</th>
+                            <th>Shared By</th>
+                            <th>Permission</th>
+                            <th>Size</th>
+                            <th>Shared</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var document in sharedDocuments)
+                        {
+                            var share = document.DocumentShares.FirstOrDefault(ds => ds.UserId == currentUserId);
+                            <tr>
+                                <td>
+                                    <strong>@document.Title</strong>
+                                    @if (!string.IsNullOrWhiteSpace(document.Description))
+                                    {
+                                        <br />
+                                        <small class="text-muted">@document.Description</small>
+                                    }
+                                </td>
+                                <td>@document.Category</td>
+                                <td>@document.UploadedByUser.DisplayName</td>
+                                <td>@(share?.PermissionLevel ?? "View")</td>
+                                <td>@FormatBytes(document.FileSizeBytes)</td>
+                                <td>@(share?.SharedAtUtc.ToLocalTime().ToString("MMM dd, yyyy") ?? "-")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => DownloadDocument(document.DocumentId)">Download</button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+<div class="modal fade" id="shareDocumentModal" tabindex="-1" aria-labelledby="shareDocumentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="shareDocumentModalLabel">Share Document</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <div class="mb-3">
+                    <label class="form-label">Share with</label>
+                    <select class="form-select" @bind="shareRecipientUserId">
+                        <option value="0">Select a user</option>
+                        @if (allUsers != null)
+                        {
+                            @foreach (var user in allUsers.Where(u => u.UserId != currentUserId))
+                            {
+                                <option value="@user.UserId">@user.DisplayName</option>
+                            }
+                        }
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Permission Level</label>
+                    <select class="form-select" @bind="sharePermissionLevel">
+                        <option value="View">View</option>
+                        <option value="Edit">Edit</option>
+                    </select>
+                </div>
+                <button type="button" class="btn btn-primary w-100" @onclick="HandleShare">Share Document</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="uploadDocumentModal" tabindex="-1" aria-labelledby="uploadDocumentModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="uploadDocumentModalLabel">Upload Document</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <EditForm Model="uploadRequest" OnValidSubmit="HandleUpload">
+                    <DataAnnotationsValidator />
+
+                    <div class="mb-3">
+                        <label class="form-label">Title</label>
+                        <InputText class="form-control" @bind-Value="uploadRequest.Title" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Category</label>
+                        <InputText class="form-control" @bind-Value="uploadRequest.Category" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Description</label>
+                        <InputTextArea class="form-control" @bind-Value="uploadRequest.Description" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Tags</label>
+                        <InputText class="form-control" @bind-Value="uploadRequest.Tags" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">File</label>
+                        <InputFile OnChange="HandleFileSelected" class="form-control" />
+                    </div>
+
+                    <button type="submit" class="btn btn-primary w-100">Upload</button>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<Document>? documents;
+    private List<Document>? sharedDocuments;
+    private List<User>? allUsers;
+    private string searchText = string.Empty;
+    private string errorMessage = string.Empty;
+    private string successMessage = string.Empty;
+    private int currentUserId;
+    private string activeTab = "mine";
+    private int shareDocumentId;
+    private int shareRecipientUserId;
+    private string sharePermissionLevel = "View";
+    private DocumentUploadRequest uploadRequest = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+        var userIdClaim = user.FindFirst(ClaimTypes.NameIdentifier);
+        if (userIdClaim != null && int.TryParse(userIdClaim.Value, out var userId))
+        {
+            currentUserId = userId;
+        }
+
+        allUsers = await UserService.GetAllUsersAsync();
+        await LoadDocuments();
+        await LoadSharedDocuments();
+    }
+
+    private async Task SetActiveTab(string tab)
+    {
+        activeTab = tab;
+        if (tab == "shared")
+        {
+            await LoadSharedDocuments();
+        }
+        else
+        {
+            await LoadDocuments();
+        }
+    }
+
+    private async Task Search()
+    {
+        if (activeTab == "shared")
+        {
+            await LoadSharedDocuments();
+        }
+        else
+        {
+            await LoadDocuments();
+        }
+    }
+
+    private async Task LoadDocuments()
+    {
+        documents = await DocumentService.GetUserDocumentsAsync(currentUserId, searchText);
+    }
+
+    private async Task LoadSharedDocuments()
+    {
+        sharedDocuments = await DocumentService.GetSharedWithMeDocumentsAsync(currentUserId, searchText);
+    }
+
+    private void OpenShareModal(int documentId)
+    {
+        shareDocumentId = documentId;
+        shareRecipientUserId = 0;
+        sharePermissionLevel = "View";
+    }
+
+    private async Task HandleShare()
+    {
+        if (shareRecipientUserId == 0)
+        {
+            errorMessage = "Please select a user to share with.";
+            return;
+        }
+
+        try
+        {
+            var shared = await DocumentService.ShareDocumentAsync(shareDocumentId, shareRecipientUserId, currentUserId, sharePermissionLevel);
+            if (shared)
+            {
+                successMessage = "Document shared successfully.";
+                errorMessage = string.Empty;
+            }
+            else
+            {
+                errorMessage = "Unable to share this document.";
+                successMessage = string.Empty;
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            successMessage = string.Empty;
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        uploadRequest.File = e.File;
+    }
+
+    private async Task HandleUpload()
+    {
+        try
+        {
+            await DocumentService.UploadDocumentAsync(uploadRequest, currentUserId);
+            successMessage = "Document uploaded successfully.";
+            errorMessage = string.Empty;
+            uploadRequest = new DocumentUploadRequest();
+            await LoadDocuments();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            successMessage = string.Empty;
+        }
+    }
+
+    private async Task DownloadDocument(int documentId)
+    {
+        try
+        {
+            var stream = await DocumentService.GetDownloadStreamAsync(documentId, currentUserId);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var bytes = ms.ToArray();
+            _ = bytes;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task DeleteDocument(int documentId)
+    {
+        try
+        {
+            var deleted = await DocumentService.DeleteDocumentAsync(documentId, currentUserId);
+            if (deleted)
+            {
+                successMessage = "Document deleted.";
+                errorMessage = string.Empty;
+                await LoadDocuments();
+            }
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        const long kb = 1024;
+        const long mb = kb * 1024;
+
+        if (bytes >= mb)
+            return $"{bytes / (double)mb:F1} MB";
+        if (bytes >= kb)
+            return $"{bytes / (double)kb:F1} KB";
+        return $"{bytes} B";
+    }
+
+    private string GetStatusColor(DocumentStatus status)
+    {
+        return status switch
+        {
+            DocumentStatus.PendingScan => "warning",
+            DocumentStatus.Approved => "success",
+            DocumentStatus.Rejected => "danger",
+            DocumentStatus.Quarantined => "dark",
+            _ => "secondary"
+        };
+    }
+}

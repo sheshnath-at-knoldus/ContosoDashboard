@@ -1,3 +1,4 @@
+using System.Data;
 using Microsoft.EntityFrameworkCore;
 using ContosoDashboard.Data;
 using ContosoDashboard.Services;
@@ -44,6 +45,8 @@ builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<IFileStorageService, LocalFileStorageService>();
+builder.Services.AddScoped<IDocumentService, DocumentService>();
 
 // Add HttpContextAccessor for accessing user claims
 builder.Services.AddHttpContextAccessor();
@@ -56,8 +59,33 @@ using (var scope = app.Services.CreateScope())
     var services = scope.ServiceProvider;
     try
     {
-        var context = services.GetRequiredService<ApplicationDbContext>();
-        context.Database.EnsureCreated(); // For development - use migrations in production
+        var logger = services.GetRequiredService<ILogger<Program>>();
+        var requiredTables = new[] { "Users", "Projects", "Tasks", "Documents" };
+
+        using var context = services.GetRequiredService<ApplicationDbContext>();
+        var dbExists = File.Exists(sqliteDbPath);
+
+        if (!dbExists)
+        {
+            logger.LogInformation("Creating fresh SQLite database for the dashboard.");
+            context.Database.EnsureCreated();
+        }
+        else if (!requiredTables.All(tableName => DatabaseHasTable(context, tableName, sqliteDbPath)))
+        {
+            logger.LogWarning("SQLite schema is missing required tables. Resetting the local development database.");
+            ResetSqliteDatabase(sqliteDbPath, context);
+
+            var rebuiltOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseSqlite($"Data Source={sqliteDbPath}")
+                .Options;
+
+            using var rebuiltContext = new ApplicationDbContext(rebuiltOptions);
+            rebuiltContext.Database.EnsureCreated();
+        }
+        else
+        {
+            context.Database.EnsureCreated();
+        }
     }
     catch (Exception ex)
     {
@@ -108,5 +136,68 @@ app.UseAuthorization();
 
 app.MapBlazorHub();
 app.MapFallbackToPage("/_Host");
+
+static bool DatabaseHasTable(ApplicationDbContext context, string tableName, string databasePath)
+{
+    try
+    {
+        if (!File.Exists(databasePath))
+        {
+            return false;
+        }
+
+        var connection = context.Database.GetDbConnection();
+        if (connection.State != ConnectionState.Open)
+        {
+            connection.Open();
+        }
+
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = @tableName LIMIT 1;";
+        var parameter = command.CreateParameter();
+        parameter.ParameterName = "@tableName";
+        parameter.Value = tableName;
+        command.Parameters.Add(parameter);
+
+        using var reader = command.ExecuteReader();
+        return reader.Read();
+    }
+    catch
+    {
+        return false;
+    }
+}
+
+static void ResetSqliteDatabase(string databasePath, ApplicationDbContext context)
+{
+    try
+    {
+        var connection = context.Database.GetDbConnection();
+        if (connection.State == ConnectionState.Open)
+        {
+            connection.Close();
+        }
+    }
+    catch
+    {
+        // Ignore connection-state issues during reset.
+    }
+
+    var databaseFiles = new[]
+    {
+        databasePath,
+        databasePath + "-wal",
+        databasePath + "-shm",
+        databasePath + "-journal"
+    };
+
+    foreach (var filePath in databaseFiles)
+    {
+        if (File.Exists(filePath))
+        {
+            File.Delete(filePath);
+        }
+    }
+}
 
 app.Run();

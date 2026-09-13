@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @attribute [Authorize]
 @inject IProjectService ProjectService
+@inject IDocumentService DocumentService
 @inject NavigationManager NavigationManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -89,7 +90,7 @@
                     </div>
                 </div>
 
-                <div class="card">
+                <div class="card mb-4">
                     <div class="card-header">
                         <h5 class="mb-0">Project Tasks</h5>
                     </div>
@@ -114,7 +115,7 @@
                                     <tbody>
                                         @foreach (var task in project.Tasks.OrderBy(t => t.DueDate))
                                         {
-                                            <tr class="@(task.DueDate.HasValue && task.DueDate < DateTime.Today && task.Status != Models.TaskStatus.Completed ? "table-danger" : "")">">
+                                            <tr class="@(task.DueDate.HasValue && task.DueDate < DateTime.Today && task.Status != Models.TaskStatus.Completed ? "table-danger" : "")">
                                                 <td>
                                                     <strong>@task.Title</strong>
                                                     @if (!string.IsNullOrEmpty(task.Description))
@@ -143,6 +144,48 @@
                                                         </span>
                                                     }
                                                 </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Project Documents</h5>
+                    </div>
+                    <div class="card-body">
+                        @if (projectDocuments == null)
+                        {
+                            <p class="text-muted">Loading documents...</p>
+                        }
+                        else if (!projectDocuments.Any())
+                        {
+                            <p class="text-muted">No documents uploaded for this project yet.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover">
+                                    <thead>
+                                        <tr>
+                                            <th>Title</th>
+                                            <th>Category</th>
+                                            <th>Status</th>
+                                            <th>Size</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var doc in projectDocuments)
+                                        {
+                                            <tr>
+                                                <td>@doc.Title</td>
+                                                <td>@doc.Category</td>
+                                                <td><span class="badge bg-@GetDocumentStatusColor(doc.Status)">@doc.Status</span></td>
+                                                <td>@FormatBytes(doc.FileSizeBytes)</td>
                                             </tr>
                                         }
                                     </tbody>
@@ -237,6 +280,7 @@
     public int ProjectId { get; set; }
 
     private Project? project;
+    private List<Document>? projectDocuments;
     private int currentUserId = 0;
 
     protected override async Task OnInitializedAsync()
@@ -253,6 +297,10 @@
         if (currentUserId > 0)
         {
             project = await ProjectService.GetProjectByIdAsync(ProjectId, currentUserId);
+            if (project != null)
+            {
+                projectDocuments = await DocumentService.GetProjectDocumentsAsync(ProjectId, currentUserId);
+            }
         }
         
         if (project == null)
@@ -304,5 +352,29 @@
             return $"{names[0][0]}{names[1][0]}".ToUpper();
         }
         return displayName.Length > 0 ? displayName[0].ToString().ToUpper() : "?";
+    }
+
+    private string GetDocumentStatusColor(DocumentStatus status)
+    {
+        return status switch
+        {
+            DocumentStatus.PendingScan => "warning",
+            DocumentStatus.Approved => "success",
+            DocumentStatus.Rejected => "danger",
+            DocumentStatus.Quarantined => "dark",
+            _ => "secondary"
+        };
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        const long kb = 1024;
+        const long mb = kb * 1024;
+
+        if (bytes >= mb)
+            return $"{bytes / (double)mb:F1} MB";
+        if (bytes >= kb)
+            return $"{bytes / (double)kb:F1} KB";
+        return $"{bytes} B";
     }
 }

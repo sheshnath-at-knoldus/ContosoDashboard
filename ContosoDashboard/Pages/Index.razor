@@ -5,6 +5,7 @@
 @attribute [Authorize]
 @inject IDashboardService DashboardService
 @inject INotificationService NotificationService
+@inject IDocumentService DocumentService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>Dashboard - ContosoDashboard</PageTitle>
@@ -76,6 +77,138 @@
         </div>
     }
 
+    @if (isAdmin && activityReport != null)
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h3>Document Activity (Admin)</h3>
+                <div class="row mb-3">
+                    <div class="col-md-3 mb-3">
+                        <div class="card summary-card">
+                            <div class="card-body">
+                                <h5 class="card-title">Total Documents</h5>
+                                <p class="card-text display-4">@activityReport.TotalDocuments</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card summary-card">
+                            <div class="card-body">
+                                <h5 class="card-title">Active Uploaders</h5>
+                                <p class="card-text display-4 text-info">@activityReport.ActiveUploaderCount</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card summary-card">
+                            <div class="card-body">
+                                <h5 class="card-title">Storage Used</h5>
+                                <p class="card-text display-4 text-warning">@FormatBytes(activityReport.TotalStorageBytes)</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-3 mb-3">
+                        <div class="card summary-card">
+                            <div class="card-body">
+                                <h5 class="card-title">Recorded Events</h5>
+                                <p class="card-text display-4 text-success">@activityReport.AccessEventsByType.Values.Sum()</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-4 mb-3">
+                        <h6>By Category</h6>
+                        <ul class="list-group">
+                            @foreach (var item in activityReport.DocumentsByCategory)
+                            {
+                                <li class="list-group-item d-flex justify-content-between">
+                                    <span>@item.Key</span>
+                                    <span class="badge bg-secondary">@item.Value</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <h6>By File Type</h6>
+                        <ul class="list-group">
+                            @foreach (var item in activityReport.DocumentsByFileType)
+                            {
+                                <li class="list-group-item d-flex justify-content-between">
+                                    <span>@item.Key</span>
+                                    <span class="badge bg-secondary">@item.Value</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <h6>Top Uploaders</h6>
+                        <ul class="list-group">
+                            @foreach (var uploader in activityReport.TopUploaders)
+                            {
+                                <li class="list-group-item d-flex justify-content-between">
+                                    <span>@uploader.DisplayName</span>
+                                    <span class="badge bg-secondary">@uploader.DocumentCount</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <h6>By Status</h6>
+                        <ul class="list-group">
+                            @foreach (var item in activityReport.DocumentsByStatus)
+                            {
+                                <li class="list-group-item d-flex justify-content-between">
+                                    <span>@item.Key</span>
+                                    <span class="badge bg-secondary">@item.Value</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <h6>Access Patterns (Audit Events)</h6>
+                        <ul class="list-group">
+                            @foreach (var item in activityReport.AccessEventsByType)
+                            {
+                                <li class="list-group-item d-flex justify-content-between">
+                                    <span>@item.Key</span>
+                                    <span class="badge bg-secondary">@item.Value</span>
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (recentDocuments != null && recentDocuments.Any())
+    {
+        <div class="row mb-4">
+            <div class="col-md-12">
+                <h3>Recent Documents</h3>
+                <div class="list-group">
+                    @foreach (var doc in recentDocuments)
+                    {
+                        <div class="list-group-item">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <strong>@doc.Title</strong>
+                                    <div class="text-muted small">@doc.Category · @doc.UploadedByUser.DisplayName</div>
+                                </div>
+                                <span class="badge bg-@GetDocumentStatusColor(doc.Status)">@doc.Status</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
     <div class="row">
         <div class="col-md-6">
             <h3>Quick Actions</h3>
@@ -85,6 +218,9 @@
                 </a>
                 <a href="/projects" class="list-group-item list-group-item-action">
                     <i class="bi bi-folder"></i> View My Projects
+                </a>
+                <a href="/documents" class="list-group-item list-group-item-action">
+                    <i class="bi bi-file-earmark-text"></i> View Documents
                 </a>
                 <a href="/notifications" class="list-group-item list-group-item-action">
                     <i class="bi bi-bell"></i> View Notifications
@@ -124,8 +260,11 @@
     private DashboardSummary? summary;
     private List<Announcement>? announcements;
     private List<Notification>? recentNotifications;
+    private List<Document>? recentDocuments;
+    private DocumentActivityReport? activityReport;
     private string userName = "User";
     private int currentUserId = 0;
+    private bool isAdmin = false;
 
     protected override async Task OnInitializedAsync()
     {
@@ -133,6 +272,7 @@
         var authState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
         var user = authState.User;
         userName = user.Identity?.Name ?? "User";
+        isAdmin = user.IsInRole(nameof(UserRole.Administrator));
 
         // Get user ID from claims
         var userIdClaim = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
@@ -146,6 +286,12 @@
             summary = await DashboardService.GetDashboardSummaryAsync(currentUserId);
             announcements = await DashboardService.GetActiveAnnouncementsAsync();
             recentNotifications = await NotificationService.GetUserNotificationsAsync(currentUserId);
+            recentDocuments = await DocumentService.GetRecentDocumentsAsync(currentUserId, 5);
+
+            if (isAdmin)
+            {
+                activityReport = await DocumentService.GetDocumentActivityReportAsync(currentUserId);
+            }
         }
     }
 
@@ -163,5 +309,32 @@
             return $"{(int)timeSpan.TotalDays} days ago";
 
         return dateTime.ToString("MMM dd, yyyy");
+    }
+
+    private string GetDocumentStatusColor(DocumentStatus status)
+    {
+        return status switch
+        {
+            DocumentStatus.PendingScan => "warning",
+            DocumentStatus.Approved => "success",
+            DocumentStatus.Rejected => "danger",
+            DocumentStatus.Quarantined => "dark",
+            _ => "secondary"
+        };
+    }
+
+    private string FormatBytes(long bytes)
+    {
+        const long kb = 1024;
+        const long mb = kb * 1024;
+        const long gb = mb * 1024;
+
+        if (bytes >= gb)
+            return $"{bytes / (double)gb:F1} GB";
+        if (bytes >= mb)
+            return $"{bytes / (double)mb:F1} MB";
+        if (bytes >= kb)
+            return $"{bytes / (double)kb:F1} KB";
+        return $"{bytes} B";
     }
 }
