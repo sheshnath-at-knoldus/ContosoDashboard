@@ -14,8 +14,9 @@ builder.Services.AddServerSideBlazor();
 builder.Services.AddScoped<AuthenticationStateProvider, CustomAuthenticationStateProvider>();
 
 // Configure Database
+var sqliteDbPath = Path.Combine(builder.Environment.ContentRootPath, "Data", "ContosoDashboard.db");
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+    options.UseSqlite($"Data Source={sqliteDbPath}"));
 
 // Configure Mock Authentication (Cookie-based for training purposes)
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
